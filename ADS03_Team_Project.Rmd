@@ -1,6 +1,6 @@
 ---
 title: "ADS503_Team_Project"
-author: "Azucena Faus"
+author: "Team 6"
 date: "6/7/2022"
 output: html_document
 ---
@@ -28,9 +28,11 @@ library(earth)
 library(plotmo)
 library(plotrix)
 library(TeachingDemos)
+library(pROC)
 
 ```
 
+#### Data Setup/Load
 
 ```{r setup_part2}
 
@@ -39,23 +41,53 @@ brain=read.table(file.choose(), header=TRUE, sep=",")
 
 ```
 
-```{r exploredata}
+#### Generate binary version of output and add to a new dataframe called **brain_df**
 
-dim(brain_df)
+```{r binarytargetvariablecreation}
+### Create a binary alternate output and include in dataframe
 
-head(brain)
-brain[,2]
+#Create an alternate output variable called Cancer with "Yes" or "No" 
+#binary output so as to facilitate an odds ratio output from a Logistic Classifier
+cancer2=brain$type
+cancer2 = as.character(brain$type)
+cancer2[cancer2 == "ependymoma"] = "Yes"
+cancer2[cancer2 == "glioblastoma"] = "Yes"
+cancer2[cancer2 == "medulloblastoma"] = "Yes"
+cancer2[cancer2 == "pilocytic_astrocytoma"] = "Yes"
+cancer2[cancer2 == "normal"] = "No"
+
+# denoting No as the first class so it can be considered the "positive class' during model development
+# this is because typically the minority class is considered the positive class:
+
+cancer2 = factor(cancer2, levels = c("No", "Yes"))
+
+brain_df <- cbind(cancer2, brain)
 
 ```
 
 
-```{r moredataexplore1}
-### Remove low variance predictors:
-### Does not work well with this data...
-#brain_idx <- nearZeroVar(brain_df[,-c(1,2)]) 
-#excluding the dependent variable
-#brain_df_var <- brain_df[,-brain_idx]
-#dim(brain_df_var)
+```{r exploredata}
+
+### Dimensions of the dataset:
+### 130 instances
+### 54677 columns
+### 54676 predictor data genomes
+### 1 target variable 'type'
+
+#dim(brain_df)
+#head(brain)
+#brain[,2]
+
+#dim(brain) #130 rows, 54677 columns
+
+```
+
+***
+
+### Visualizations
+
+```{r skewhistograms fig1, fig.height = 6, fig.width = 6}
+### Checking the skewness and scales of a few predictor variables in the dataset
 
 hist(brain$X1007_s_at)
 hist(brain$X1053_at)
@@ -63,207 +95,576 @@ hist(brain$X117_at)
 hist(brain$X121_at)
 ```
 
-```{r dataprocesses1}
-### Create a binary alternate output and include in dataframe
-
-#Create an alternate output variable called Cancer with "Yes" or "No" 
-#binary output so as to facilitate an odds ratio output from a Logistic Classifier
-cancer = as.character(brain$type)
-cancer[cancer == "ependymoma"] = "Yes"
-cancer[cancer == "glioblastoma"] = "Yes"
-cancer[cancer == "medulloblastoma"] = "Yes"
-cancer[cancer == "pilocytic_astrocytoma"] = "Yes"
-cancer[cancer == "normal"] = "No"
-#cancer = factor(any_damage, levels = c("Yes", "No"))
-cancer = factor(cancer, levels = c("Yes", "No"))
-brain_df <- cbind(cancer, brain)
-
-```
-
-#### Data train/test data splits based on binary output *cancer* for logistic classification:
-
-```{r logisticclassdata}
-set.seed(100)
-
-### stratified random sampling to split up the data 
-### while keeping the class proportions for binary class cancer:
-
-brain_train_idx <- createDataPartition(brain_df$cancer, p=0.8, list = FALSE)
-brain_trainb <- brain_df[brain_train_idx,]
-brain_testb <- brain_df[-brain_train_idx,]
-
-```
-
-#### Data train/test data splits based on multi-class output *type* for logistic classification:
-
-```{r multiclassdatasplit}
-
-### Stratified random sampling for multiclass output classes, type:
-set.seed(100)
-
-brain_train_idx <- createDataPartition(brain_df$type, p=0.8, list = FALSE)
-brain_train1 <- brain_df[brain_train_idx,]
-brain_test1 <- brain_df[-brain_train_idx,]
-
-
-```
-
-#### Moving forward with multiclass variable "type" stratified random split:
-
-```{r scalecenter}
-
-
-brain_process <- preProcess(brain_train1[,-c(1:3)],
-                    method = c("BoxCox", "scale", "center"))
-brain_train <- predict(brain_process, brain_train1)
-
-```
-
-
-```{r pca}
-
-brain_pca <- preProcess(brain_train[,-c(1,2)],
-                    method = c("pca"))
-
-brain_train_pca <- predict(brain_pca, brain_train)
-
-```
-
-```{r crossvalidation}
-
-# Create 10x cross validation folds:
-brain_cv_idx <- createFolds(brain_train_pca$type, returnTrain = TRUE)
-brain_ctrl <- trainControl(method = "cv", index = brain_cv_idx)
-
-```
-
-
-
-```{r moredataexplore3}
-
-head(brain_train_pca)
-dim(brain_train_pca)
-
-```
-
-```{r moredataexplore4}
-
-hist(brain_train_pca$PC1)
-hist(brain_train_pca$PC1)
-```
-
-```{r moredataexplore5}
-brain_trainX <- brain_train_pca[,-c(1,2)]
-brain_testX1 <- brain_test1[,-c(1,2)]
-
-brain_trainY <- brain_train_pca[,2]
-brain_testY1 <- brain_test1[,2]
-
-
-
-brain_trainY = factor(brain_trainY)
-
-	
-brain_testY1 = factor(brain_testY1)
-
-set.seed(100)
-svmR_brain_model <- train(x = brain_trainX, y = brain_trainY,
-                  method = "svmLinear",
-                  tuneLength = 14,
-                  trControl = brain_ctrl)
-svmR_model
-#plot(svmR_brain_model, scales = list(x = list(log = 2))) 
-svmRImpB <- varImp(svmR_brain_model, scale = FALSE)
-plot(svmRImpB, top = 25)
-#svmR_model$finalModel
-# RESULTS:
-# optimal C=4
-# epsilon=0.1
-# sigma=0.01826
-# 1.329 RMSE, .4649 R^2
-
-```
-
-#### Model 5: Random Forest
-```{r}
-library(randomForest)
-
-# Random Forest to predict Caner (Yes/No)
-
-  # set x and y
-train_x <- brain_train_pca[4:83]
-can_train_y <- brain_train_pca[1]
-type_train_y <- brain_train_pca[3]
-
-  # train control
-ctrl <- trainControl(method = "cv", 
-                     summaryFunction = twoClassSummary, 
-                     classProbs = TRUE, 
-                     savePredictions = TRUE)
-
-  # model
-library(randomForest)
-rf <- randomForest(x = train_x,
-                   y = can_train_y$cancer,
-                   method = "rf",
-                   importance = TRUE,
-                   trControl = ctrl,
-                   ntree = 100)
-
-  # confusion matrix
-confusionMatrix(rf$pred, can_train_y$cancer)
-```
-
-```{r}
-# Random Forest to predict caner type (ependymoma, glioblastoma, medulloblastoma, normal, pilocytic_astrocytoma)
-
-  # train control
-ctrl <- trainControl(method = "cv", 
-                     classProbs = TRUE, 
-                     savePredictions = TRUE)
-
-  # model
-rf2 = train(x = train_x,
-            y = type_train_y$type,
-            method = "rf",
-            metric = "Accuracy",
-            importance = TRUE, 
-            trControl = ctrl,
-            ntree = 100 )
-
-  # confusion matrix
-confusionMatrix(rf2)
-```
-
-#### Visualizations
-```{r plotsdata}
+```{r plottypetargetvar fig1, fig.height = 6, fig.width = 6}
 # distribution for type
 ggplot(brain, aes(x = type)) +
     geom_bar(position = position_dodge()) +
     theme_classic()
 ```
 
-```{r}
+```{r typvariabletable}
 # value count for type 
 as.data.frame(table(brain[2]))
 ```
 
-```{r}
+```{r cancervariabledistribution fig1, fig.height = 4, fig.width = 4}
 # distribution for cancer
-ggplot(brain, aes(x = cancer)) +
+ggplot(brain_df, aes(x = cancer2)) +
     geom_bar(position = position_dodge()) +
     theme_classic()
+
+as.data.frame(table(brain_df[1]))
+
 ```
 
-```{r}
-# predictors skewness
-gene_ele <- brain_train_pca[4:83]
+```{r nearzerovar}
+### Remove low variance predictors:
+### Does not work well with this data...
+### Removes all columns, so we did not implement this
+
+
+#brain_idx <- nearZeroVar(brain[,-c(1:2)], freqCut = 30) 
+#excluding the dependent variable
+#brain_df_var <- brain[,-brain_idx]
+#dim(brain_df_var)
+
+```
+
+***
+
+### Split data
+
+
+#### Data train/test data splits based on **Binary** target variable *cancer2*
+
+```{r logisticclassdata_LR}
+set.seed(100)
+
+### stratified random sampling to split up the data 
+### while keeping the class proportions for binary class cancer:
+
+brain_train1_idx <- createDataPartition(brain_df$cancer2, p=0.67, list = FALSE)
+brain_trainb <- brain_df[brain_train1_idx,]
+brain_testb <- brain_df[-brain_train1_idx,]
+
+```
+
+#### Data train/test data splits based on multi-class output *type*:
+
+```{r multiclassdatasplit}
+
+### Stratified random sampling for multiclass output classes, type:
+#set.seed(100)
+#brain$type=as.factor(brain$type)
+
+#brain_train_idx <- createDataPartition(brain$type, p=0.67, list = FALSE)
+#brain_train1 <- brain[brain_train_idx,]
+#brain_test1 <- brain[-brain_train_idx,]
+
+
+```
+
+***
+
+### Data pre-processing
+
+#### BoxCox, Scale and Center **Binary** target variable Training data:
+
+```{r scalecenter_multiclass_LR}
+# because some distributions were slightly skewed, implementing BoxCox
+
+brain_processb <- preProcess(brain_trainb[,-c(1:3)],
+                    method = c("BoxCox", "scale", "center"))
+brain_trainLR <- predict(brain_processb, brain_trainb)
+
+```
+
+#### PCA to reduce correlation among predictors for **Binary** target variable data
+#### (this will be used for some models):
+
+```{r pca_LR}
+
+brain_pcaLR <- preProcess(brain_trainLR[,-c(1:3)],
+                    method = c("pca"))
+brain_pcaLR
+
+brain_trainLR_pca <- predict(brain_pcaLR, brain_trainLR)
+
+### 67 principal components capture 95% of variance
+```
+
+#### Binary Test Dataset processing 
+(to avoid any leakage of training data onto the test data)
+
+#### BoxCox, Scale and Center Test data for **Binary** target variable:
+
+```{r scalecenterbinarytestdata}
+
+brain_processbtest <- preProcess(brain_testb[,-c(1:3)],
+                    method = c("BoxCox", "scale", "center"))
+brain_testLR <- predict(brain_processbtest, brain_testb)
+```
+
+#### PCA on test data **Binary** target variable:
+
+```{r pcatestbinary data}
+
+#brain_pcaLRtest <- preProcess(brain_testLR[,-c(1:3)],
+#                    method = c("pca"))
+#brain_pcaLRtest
+
+brain_testLR_pca <- predict(brain_pcaLR, brain_testLR)
+
+### 33 components capture 95% of variance
+```
+
+#### Visualizations for Principle components
+
+```{r histograms_pca  fig1, fig.height = 7, fig.width = 7}
+# predictors have no skew/centered/scaled and uncorrelated with Principal components
+gene_ele <- brain_trainLR_pca[4:70]
 hist.data.frame(gene_ele)
 ```
 
-```{r}
-# correlation
+```{r correlationPCA  fig1, fig.height = 3, fig.width = 3}
+### correlation of PC1 and PC2 , there is no correlation, as expected
+
 library(corrplot)
 res <- cor(gene_ele)
 corrplot(res)
 ```
+
+
+#### Multinomiall target variable datasets
+
+#### BoxCox, Scale and Center Training data **Mulitinomial** target variable "type":
+
+```{r scalecenter_multiclass}
+
+#brain_process <- preProcess(brain_train1[,-c(1:2)],
+#                    method = c("BoxCox", "scale", "center"))
+#brain2_train <- predict(brain_process, brain_train1)
+
+```
+
+#### PCA on training data **Mulitnomial** target variable:
+
+```{r pcatrainmultinomial data}
+
+#brain_pcatrain <- preProcess(brain2_train[,-c(1:2)],
+#                    method = c("pca"))
+#brain_pcatrain
+
+#brain_train_pca <- predict(brain_pcatest, brain2_train)
+```
+
+
+#### Multinomial Test Dataset processing 
+(to avoid any leakage of training data onto the test data)
+
+#### BoxCox, center and scale test data **Multinomial** target variable:
+
+```{r prepare_test_data}
+
+#brain_process_test <- preProcess(brain_test1[,-c(1:2)],
+#                    method = c("BoxCox", "scale", "center"))
+#brain2_test <- predict(brain_process_test, brain_test1)
+
+```
+
+#### PCA on test data **Mulitnomial** target variable:
+
+```{r pcatestmultinomial data}
+
+#brain_pcatest <- preProcess(brain2_test[,-c(1:2)],
+#                    method = c("pca"))
+#brain_pcatest
+
+#brain_test_pca <- predict(brain_pcatest, brain2_test)
+```
+
+***
+
+### Modeling
+
+
+#### Logistic Regression Model:
+
+```{r LR_model}
+
+defaultW <- getOption("warn") 
+options(warn = -1) 
+
+ctrl_LRC_brain <- trainControl(method = "cv",
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     savePredictions = TRUE)
+
+set.seed(476)
+
+LR_model_brain <- train(x = brain_trainLR_pca[,-c(1:3)], 
+               y = brain_trainLR_pca$cancer2,
+               method = "glm",
+               metric = "ROC",
+               trControl = ctrl_LRC_brain)
+
+#LR_model_brain <- train(x = brain_trainb[,-c(1:3)], 
+#               y = brain_trainb$cancer2,
+#               method = "glm",
+#               metric = "ROC",
+#               preProcess = c("BoxCox", "pca"),
+#               trControl = ctrl_LRC_brain)
+
+LR_model_brain
+#LR_model_brain$finalModel
+lrCM_brain <- confusionMatrix(LR_model_brain, norm = "none")
+lrCM_brain
+
+### Logistic Regression Results on training data:
+# Sensitivity: .7778
+# ROC: .879
+# Cross Validated Accuracy: .8523
+# warnings regarding convergence with 0 or 1 probabilities.
+
+# Interpretation of Results:
+
+# Pretty low Sensitivity - and based on the confusion matrix, this is confirmed.
+# It means we have false positives: where Cancer is
+# not predicted, but cancer is present. Not a viable model so far...
+
+```
+
+
+```{r checks_LR}
+
+#head(brain_testLR_pca)
+
+
+lr_pred = predict(LR_model_brain, brain_testLR_pca[,-c(1:3)])
+
+#Store results in dataframe for later comparisons:
+
+testResults <- data.frame(obs = brain_testLR_pca$cancer2,
+                          LR = lr_pred)
+
+
+```
+
+
+***
+
+
+#### Nearest Shrunken Centroid Model:
+
+```{r shrunken_centroids}
+
+## used leave one out cross validation to avoid warning messages of missing data:
+
+ctrl_brain2 <- trainControl(method = "LOOCV",
+                     classProbs = FALSE,
+                     savePredictions = TRUE)
+
+
+
+set.seed(476)
+
+#nsc_model_brain2 <- train(x = brain2_train[,-c(1:2)], 
+#                y = brain2_train$type,
+#                method = "pam",
+#                tuneGrid = data.frame(threshold = seq(0, 25, length = 30)),
+#                trControl = ctrl_brain2)
+
+nsc_model_brain2 <- train(x = brain_trainLR[,-c(1:3)], 
+                y = brain_trainLR$cancer2,
+                method = "pam",
+                tuneGrid = data.frame(threshold = seq(0, 25, length = 30)),
+                trControl = ctrl_brain2)
+
+
+#nsc_model_brain2 <- train(x = brain_train1[,-c(1:2)], 
+#                y = brain_train1$type,
+#                method = "pam",
+#                preProcess = c("BoxCox", "center", "scale"),
+#                tuneGrid = data.frame(threshold = seq(0, 25, length = 30)),
+#                trControl = ctrl_brain2)
+nsc_model_brain2
+
+### RESULTS Nearest Shrunken Centriods Training:
+#Accuracy: .9886
+#Kappa: .9411
+#threshold = 0
+#number predictors: 54675
+
+# Interpreation of Results:
+
+# Great Accuracy,hopefully sensitivity holds up during testing, as we care a great deal about false positives.
+
+```
+
+#### Most important variables for the NSC model on brain training data:
+
+```{r model_results_nsc}
+
+ImpVar_NCS_brain2 <- varImp(nsc_model_brain2, scale = FALSE)
+plot(ImpVar_NCS_brain2, top=5)
+
+```
+
+
+#### Evaluate the NSC model on test data:
+
+```{r shurnken_centoids_results}
+#brain2_nsc_pred <- predict(nsc_model_brain2, brain2_test[,-c(1:2)])
+
+#confusionMatrix(brain2_nsc_pred, brain2_test$type)
+
+nsc_pred <- predict(nsc_model_brain2, brain_testLR[,-c(1:3)])
+
+testResults$NSC <- nsc_pred
+
+```
+
+
+***
+
+### PLSDA modeling (using binary data without PCA):
+
+
+```{r PLSDA_modeling}
+## use 10 fold cross validation here:
+
+set.seed(476)
+plsda_model_brain <- train(x = brain_trainLR[,-c(1:3)], 
+                y = brain_trainLR$cancer2,
+                method = "pls",
+                tuneGrid = expand.grid(.ncomp = 1:10),
+                metric = "ROC",
+                trControl = ctrl_LRC_brain)
+
+plsda_model_brain
+plsda_model_brain$finalModel
+
+# PLSDA Results on Training Data:
+# ROC: 1
+# Sensitivity: .8889
+# ncomp: 2
+
+#Interpretation of Results:
+
+# Accuracy is pretty good, give our baseline requirement of over 90%, since about 90% of cases are "Yes" classified.
+# Sensitivity is good though, hopefully we will see low false positive predictions in the test results
+
+```
+
+
+```{r checks_LR}
+
+PLSDA_pred = predict(plsda_model_brain, brain_testLR[-c(1:3)])
+
+testResults$PLSDA <- PLSDA_pred
+
+
+```
+
+
+#### Model 5: Random Forest
+```{r rf1}
+rf_ntree <- randomForest(cancer2~.,data=brain_trainLR_pca)
+plot(rf_ntree)
+```
+
+```{r rf1}
+library(randomForest)
+# Random Forest to predict Caner (Yes/No)
+  # set x and y
+train_x <- brain_trainLR_pca[,-c(1:3)]
+can_train_y <- brain_trainLR_pca[1]
+type_train_y <- brain_trainLR_pca[3]
+  # train control
+
+set.seed(476)
+ctrl <- trainControl(method = "cv", 
+                     summaryFunction = twoClassSummary, 
+                     classProbs = TRUE, 
+                     savePredictions = TRUE)
+  # model
+library(randomForest)
+rf <- randomForest(x = brain_trainLR_pca[,-c(1:3)],
+                   y = brain_trainLR_pca$cancer2,
+                   method = "rf",
+                   importance = TRUE,
+                   trControl = ctrl,
+                   ntree = 100)
+  # confusion matrix
+confusionMatrix(rf$pred, brain_trainLR_pca$cancer2)
+
+
+# Random Forest Results:
+# Accuracy: .9318
+# Sensitivity: 333
+
+# Interpreation of Results:
+
+# Suspicion is that RF considers "Yes" the positive class, hence the low Sensitivity
+# From the confusion matrix, it is clear that None of the "Yes" cases were predicted
+# as "No"'s so it is clear this model has no false positives, according to the minority class.
+# hence Accuracy suffers, since the data is already imbalanced and about 90% of cases are "Yes"
+# This accuracy barely surpsasses this baseline accuracy requirement.
+```
+```{r checks_rf}
+
+rf_predict = predict(rf, brain_testLR_pca[-c(1:3)])
+
+testResults$RF <- rf_predict
+
+
+```
+
+
+***
+
+#### SVM Model
+
+
+```{r moredataexplore5}
+
+# Leave One Out cross validation, using pca data
+# tuning hyper parameters
+
+ctrl_SVM <- trainControl(method = "LOOCV",
+                     savePredictions = TRUE)
+
+sigmaRangeReduced <- sigest(as.matrix(brain_trainLR_pca[,-c(1:3)]))
+svmRGridReduced <- expand.grid(.sigma = sigmaRangeReduced[1], .C = 2^(seq(-4, 4)))
+
+set.seed(100)
+svm_model <- train(x = brain_trainLR_pca[,-c(1:3)], y = brain_trainLR_pca$cancer2,
+                  method = "svmRadial",
+                  tuneGrid = svmRGridReduced,
+                  fit = FALSE,
+                  trControl = ctrl_SVM)
+svm_model
+
+# SVM model resutls:
+# sigma = .005988
+# C = 4
+# Accuracy: .966
+# Kappa: .7822
+
+# Interpretation of Results:
+
+# Accuracy barely surpasses baseline, hopefully this helps in testresults
+
+```
+
+```{r checks_rf}
+
+svm_predict = predict(svm_model, brain_testLR_pca[-c(1:3)])
+
+testResults$SVM <- svm_predict
+
+
+```
+
+
+#### Neural Network Model
+
+```{r nnet}
+#applied neural network on PCA training/test datasets
+#same cross validation as in random forest, logistic regression and plsda
+
+
+nnetGrid <- expand.grid(decay = c(.1, .5, .1),
+                        size = c(1, 10, 1))
+maxSize = max(nnetGrid$size)
+
+numWts <- 1*(maxSize * (length(brain_trainLR_pca[,-c(1:3)]) +1) + maxSize +1)
+
+set.seed(100)
+nnet <- train(x = brain_trainLR_pca[,-c(1:3)], y = brain_trainLR_pca$cancer2,
+              method = "nnet",
+              tuneGrid = nnetGrid,
+              trControl = ctrl,
+              trace = FALSE,
+              MaxNWts = numWts,
+              Maxit = 2000)
+
+
+nnet
+plot(nnet)
+#head(nnet$finalModel$wts)
+
+# Neural Network Results:
+# ROC: 1
+# Sensitivity: .8889
+# size = 10
+# decay = 0.5
+
+# Interpretation of Results:
+
+# Sensitivity looks promising. hopefully we see this on testresults
+
+```
+
+```{r checks_nnet}
+
+NN_pred <- predict(nnet, brain_testLR_pca[-c(1:3)])
+testResults$NN <- NN_pred
+
+```
+
+***
+
+### Evaluate Results
+
+
+```{r EvaluateModels}
+
+#nnRoc <- roc(response = NN_pred$pred$obs,
+#             predictor = NN_pred$pred$No,
+#             levels = rev(levels(NN_pred$pred$obs)))
+
+#ldaRoc <- roc(response = rf_predict$pred$obs,
+#             predictor = rf_predict$pred$No,
+#             levels = rev(levels(rf_predict$pred$obs)))
+
+#plsdaRoc <- roc(response = PLSDA_pred$pred$obs,
+#             predictor = PLSDA_pred$pred$No,
+#             levels = rev(levels(PLSDA_pred$pred$obs)))
+
+#nscRoc <- roc(response = nsc_pred$pred$obs,
+#             predictor = nsc_pred$pred$No,
+#             levels = rev(levels(nsc_pred$pred$obs)))
+
+#lrRoc <- roc(response = lr_pred$pred$obs,
+#             predictor = lr_pred$pred$No,
+#             levels = rev(levels(lr_pred$pred$obs)))
+
+#svmRoc <- roc(response = svm_predict$pred$obs,
+#             predictor = svm_predict$pred$No,
+#             levels = rev(levels(svm_predict$pred$obs)))
+
+#plot(svmRoc, type = "s", col = 'pink', legacy.axes = TRUE)
+#plot(rfRoc, type = "s", col = 'orange', legacy.axes = TRUE)
+#plot(lrRoc, type = "s", col = 'red', legacy.axes = TRUE)
+#plot(plsdaRoc, type = "s", add = TRUE, col = 'green', legacy.axes = TRUE)
+#plot(nnRoc, type = "s", add = TRUE, col = 'blue', legacy.axes = TRUE)
+#plot(nscRoc, type = "s", add = TRUE, legacy.axes = TRUE)
+#legend("bottomright", legend=c("SVM", "RF", "LR", "PLSDA", "NN", "NSC"),
+#       col=c("pink", "orange", "red", "green","blue", "black"), lwd=2)
+#title(main = "Compare ROC curves from different models", outer = TRUE)
+
+### Compare Models using confusion matrix
+
+confusionMatrix(testResults$RF, testResults$obs)
+confusionMatrix(testResults$LR, testResults$obs)
+confusionMatrix(testResults$PLSDA, testResults$obs)
+confusionMatrix(testResults$NN, testResults$obs)
+confusionMatrix(testResults$NSC, testResults$obs)
+confusionMatrix(testResults$SVM, testResults$obs)
+
+
+
+
+```
+
